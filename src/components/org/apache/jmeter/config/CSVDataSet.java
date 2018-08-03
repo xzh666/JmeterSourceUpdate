@@ -21,10 +21,21 @@ package org.apache.jmeter.config;
 import java.beans.BeanInfo;
 import java.beans.IntrospectionException;
 import java.beans.Introspector;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.net.InetAddress;
+import java.net.URL;
+import java.net.UnknownHostException;
 import java.util.ResourceBundle;
 
 import org.apache.commons.lang3.StringUtils;
+import org.apache.http.HttpEntity;
+import org.apache.http.HttpResponse;
+import org.apache.http.client.methods.HttpGet;
+import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.impl.client.HttpClients;
 import org.apache.jmeter.engine.event.LoopIterationEvent;
 import org.apache.jmeter.engine.event.LoopIterationListener;
 import org.apache.jmeter.engine.util.NoConfigMerge;
@@ -151,77 +162,78 @@ public class CSVDataSet extends ConfigTestElement
 
     @Override
     public void iterationStart(LoopIterationEvent iterEvent) {
-        FileServer server = FileServer.getFileServer();
-        final JMeterContext context = getThreadContext();
-        String delim = getDelimiter();
-        if ("\\t".equals(delim)) { // $NON-NLS-1$
-            delim = "\t";// Make it easier to enter a Tab // $NON-NLS-1$
-        } else if (delim.isEmpty()){
-            log.debug("Empty delimiter, will use ','");
-            delim=",";
-        }
-        if (vars == null) {
-            String fileName = getFilename().trim();
-            String mode = getShareMode();
-            int modeInt = CSVDataSetBeanInfo.getShareModeAsInt(mode);
-            switch(modeInt){
-                case CSVDataSetBeanInfo.SHARE_ALL:
-                    alias = fileName;
-                    break;
-                case CSVDataSetBeanInfo.SHARE_GROUP:
-                    alias = fileName+"@"+System.identityHashCode(context.getThreadGroup());
-                    break;
-                case CSVDataSetBeanInfo.SHARE_THREAD:
-                    alias = fileName+"@"+System.identityHashCode(context.getThread());
-                    break;
-                default:
-                    alias = fileName+"@"+mode; // user-specified key
-                    break;
-            }
-            final String names = getVariableNames();
-            if (StringUtils.isEmpty(names)) {
-                String header = server.reserveFile(fileName, getFileEncoding(), alias, true);
-                try {
-                    vars = CSVSaveService.csvSplitString(header, delim.charAt(0));
-                    firstLineIsNames = true;
-                } catch (IOException e) {
-                    throw new IllegalArgumentException("Could not split CSV header line from file:" + fileName,e);
-                }
-            } else {
-                server.reserveFile(fileName, getFileEncoding(), alias, ignoreFirstLine);
-                vars = JOrphanUtils.split(names, ","); // $NON-NLS-1$
-            }
-            trimVarNames(vars);
-        }
-           
-        // TODO: fetch this once as per vars above?
-        JMeterVariables threadVars = context.getVariables();
-        String[] lineValues = {};
-        try {
-            if (getQuotedData()) {
-                lineValues = server.getParsedLine(alias, recycle, 
-                        firstLineIsNames || ignoreFirstLine, delim.charAt(0));
-            } else {
-                String line = server.readLine(alias, recycle, 
-                        firstLineIsNames || ignoreFirstLine);
-                lineValues = JOrphanUtils.split(line, delim, false);
-            }
-            for (int a = 0; a < vars.length && a < lineValues.length; a++) {
-                threadVars.put(vars[a], lineValues[a]);
-            }
-        } catch (IOException e) { // treat the same as EOF
-            log.error(e.toString());
-        }
-        if (lineValues.length == 0) {// i.e. EOF
-            if (getStopThread()) {
-                throw new JMeterStopThreadException("End of file:"+ getFilename()+" detected for CSV DataSet:"
-                        +getName()+" configured with stopThread:"+ getStopThread()+", recycle:" + getRecycle());
-            }
-            for (String var :vars) {
-                threadVars.put(var, EOFVALUE);
-            }
-        }
-    }
+		FileServer server = FileServer.getFileServer();
+		final JMeterContext context = getThreadContext();
+		String delim = getDelimiter();
+		if ("\\t".equals(delim)) { // $NON-NLS-1$
+			delim = "\t";// Make it easier to enter a Tab // $NON-NLS-1$
+		} else if (delim.isEmpty()) {
+			log.debug("Empty delimiter, will use ','");
+			delim = ",";
+		}
+		if (vars == null) {
+			String fileName = getFilename().trim();
+			if (fileName.startsWith("http")) {
+				fileName = downLoadCsvFile(fileName);
+			}
+			String mode = getShareMode();
+			int modeInt = CSVDataSetBeanInfo.getShareModeAsInt(mode);
+			switch (modeInt) {
+			case CSVDataSetBeanInfo.SHARE_ALL:
+				alias = fileName;
+				break;
+			case CSVDataSetBeanInfo.SHARE_GROUP:
+				alias = fileName + "@" + System.identityHashCode(context.getThreadGroup());
+				break;
+			case CSVDataSetBeanInfo.SHARE_THREAD:
+				alias = fileName + "@" + System.identityHashCode(context.getThread());
+				break;
+			default:
+				alias = fileName + "@" + mode; // user-specified key
+				break;
+			}
+			final String names = getVariableNames();
+			if (StringUtils.isEmpty(names)) {
+				String header = server.reserveFile(fileName, getFileEncoding(), alias, true);
+				try {
+					vars = CSVSaveService.csvSplitString(header, delim.charAt(0));
+					firstLineIsNames = true;
+				} catch (IOException e) {
+					throw new IllegalArgumentException("Could not split CSV header line from file:" + fileName, e);
+				}
+			} else {
+				server.reserveFile(fileName, getFileEncoding(), alias, ignoreFirstLine);
+				vars = JOrphanUtils.split(names, ","); // $NON-NLS-1$
+			}
+			trimVarNames(vars);
+		}
+
+		// TODO: fetch this once as per vars above?
+		JMeterVariables threadVars = context.getVariables();
+		String[] lineValues = {};
+		try {
+			if (getQuotedData()) {
+				lineValues = server.getParsedLine(alias, recycle, firstLineIsNames || ignoreFirstLine, delim.charAt(0));
+			} else {
+				String line = server.readLine(alias, recycle, firstLineIsNames || ignoreFirstLine);
+				lineValues = JOrphanUtils.split(line, delim, false);
+			}
+			for (int a = 0; a < vars.length && a < lineValues.length; a++) {
+				threadVars.put(vars[a], lineValues[a]);
+			}
+		} catch (IOException e) { // treat the same as EOF
+			log.error(e.toString());
+		}
+		if (lineValues.length == 0) {// i.e. EOF
+			if (getStopThread()) {
+				throw new JMeterStopThreadException("End of file:" + getFilename() + " detected for CSV DataSet:"
+						+ getName() + " configured with stopThread:" + getStopThread() + ", recycle:" + getRecycle());
+			}
+			for (String var : vars) {
+				threadVars.put(var, EOFVALUE);
+			}
+		}
+	}
 
     /**
      * trim content of array varNames
@@ -331,4 +343,105 @@ public class CSVDataSet extends ConfigTestElement
     public void setIgnoreFirstLine(boolean ignoreFirstLine) {
         this.ignoreFirstLine = ignoreFirstLine;
     }
+    
+	/**
+	 * 下载文件
+	 * 
+	 * @param url
+	 * @param destFileName
+	 *            xxx.jpg/xxx.png/xxx.txt
+	 * @throws ClientProtocolException
+	 * @throws IOException
+	 */
+	public String downLoadCsvFile(String url) {
+		// 生成一个httpclient对象
+		CloseableHttpClient httpclient = null;
+		String newFilename = "";
+		InputStream in = null;
+		try {
+			InetAddress netAddress = getInetAddress();
+			String slaveHostName = getHostName(netAddress);
+			URL urlObj = new URL(url);
+			String urlStr = urlObj.getQuery();
+			String[] params = urlStr.split("&");
+			String fileName = "";
+			for(String param :params ){
+				if(param.contains("fileName")){
+					String[] fileNames =  param.split("=");
+					fileName = fileNames[1];
+				}
+			}
+			if(urlStr.contains("isSplit")){
+				newFilename = getLocalFileName(fileName,slaveHostName);
+			}else{
+				newFilename = fileName;
+			}
+			System.out.println("urlStr:"+urlStr);
+			httpclient = HttpClients.createDefault();
+			String newUrl = url+"&hostName="+slaveHostName;
+			HttpGet httpget = new HttpGet(newUrl);
+			HttpResponse response = httpclient.execute(httpget);
+			HttpEntity entity = response.getEntity();
+			in = entity.getContent();
+			File parentDir = new File(System.getProperty("user.dir") + File.separator + "remoteCsvFile");
+			if (!parentDir.exists()) {
+				parentDir.mkdirs();
+			}
+			//File file = new File(parentDir, url.split("=")[1]);
+			File file = new File(parentDir, newFilename);
+
+			System.out.println("file.getAbsolutePath==================>" + file.getAbsolutePath());
+
+			FileOutputStream fout = new FileOutputStream(file);
+			int l = -1;
+			byte[] tmp = new byte[1024 * 10 * 10];
+			while ((l = in.read(tmp)) != -1) {
+				fout.write(tmp, 0, l);
+				// 注意这里如果用OutputStream.write(buff)的话，图片会失真，大家可以试试
+			}
+			fout.flush();
+			fout.close();
+			return file.getAbsolutePath();
+		} catch (Exception e) {
+			e.printStackTrace();
+		} finally {
+			// 关闭低层流。
+			try {
+				in.close();
+			} catch (IOException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+		}
+		try {
+			httpclient.close();
+		} catch (IOException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+		return "";
+	}
+	
+	public static InetAddress getInetAddress() {
+
+		try {
+			return InetAddress.getLocalHost();
+		} catch (UnknownHostException e) {
+			System.out.println("unknown host!");
+		}
+		return null;
+
+	}
+
+	public static String getHostName(InetAddress netAddress) {
+		if (null == netAddress) {
+			return null;
+		}
+		String name = netAddress.getHostName(); // get the host address
+		return name;
+	}
+	
+	public static String getLocalFileName(String fileName,String hostName){
+		return fileName.substring(0,fileName.lastIndexOf("."))+"-"+hostName+fileName.substring(fileName.lastIndexOf("."));
+	}
 }
