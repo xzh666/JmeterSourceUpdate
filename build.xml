@@ -534,6 +534,7 @@
     <pathelement location="${lib.dir}/${xmlpull.jar}"/>
     <pathelement location="${lib.dir}/${xpp3.jar}"/>
     <pathelement location="${lib.dir}/${xstream.jar}"/>
+  	<pathelement location="${lib.dir}/fastjson-1.2.31.jar"/>
     <!-- Generated jars -->
     <fileset dir="${lib.dir}" includes="jorphan.jar"/>
     <!-- bshclient is needed to prevent occasional test failures in TestClassFinder -->
