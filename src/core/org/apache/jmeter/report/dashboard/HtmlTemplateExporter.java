@@ -20,6 +20,13 @@ package org.apache.jmeter.report.dashboard;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.sql.Connection;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Iterator;
 import java.util.Map;
 import java.util.TimeZone;
 import java.util.regex.Pattern;
@@ -44,13 +51,21 @@ import org.apache.jmeter.report.processor.ResultDataVisitor;
 import org.apache.jmeter.report.processor.SampleContext;
 import org.apache.jmeter.report.processor.ValueResultData;
 import org.apache.jmeter.report.processor.graph.AbstractGraphConsumer;
+import org.apache.jmeter.threads.JMeterContextService;
+import org.apache.jmeter.threads.JMeterContextService.ThreadCounts;
 import org.apache.jmeter.util.JMeterUtils;
+import org.apache.jmeter.xuzhihua.MysqlUtil;
 import org.apache.jorphan.util.JOrphanUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONArray;
+import com.alibaba.fastjson.JSONObject;
+
 import freemarker.template.Configuration;
 import freemarker.template.TemplateExceptionHandler;
+
 
 /**
  * The class HtmlTemplateExporter provides a data exporter that generates and
@@ -297,9 +312,25 @@ public class HtmlTemplateExporter extends AbstractDataExporter {
             Map<String, Object> storage, DataContext dataContext,
             ResultDataVisitor<TVisit> visitor, ResultCustomizer customizer,
             ResultChecker checker) {
+    	//System.out.println("resultKey:"+resultKey);
+    	SimpleDateFormat formatter = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+    	String dateString = formatter.format(new Date());
+    	Connection conn = null;
+    	Statement stmt = null;
+
+    	try {
+			
+    		conn = MysqlUtil.getConnection();
+			stmt = conn.createStatement();
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
         Object data = storage.get(resultKey);
+        ThreadCounts tc = JMeterContextService.getThreadCounts();
         if (data instanceof ResultData) {
             ResultData result = (ResultData) data;
+            
+            //System.out.println("ResultData:"+result);
             if (checker != null) {
                 checker.checkResult(dataContext, result);
             }
@@ -307,6 +338,113 @@ public class HtmlTemplateExporter extends AbstractDataExporter {
                 result = customizer.customizeResult(result);
             }
             dataContext.put(resultKey, result.accept(visitor));
+            System.out.println("resultKey=====>:"+resultKey);
+            try {
+				if ("requestsSummary".equals(resultKey)) {
+					JSONObject resultJsonObj = (JSONObject) JSON.parse(result.accept(visitor).toString());
+					System.out.println(
+							"========================> items-->requestsSummary:" + JSON.toJSONString(resultJsonObj));
+
+					String okPercent = resultJsonObj.getString("OkPercent");
+					String koPercent = resultJsonObj.getString("KoPercent");
+
+					String selectSql = "select count(*) as num from jmeter_requests_summary where name = " + "\""
+							+ JMeterContextService.currentTestName + "\"" + " and " + "thread_count = " + "\""
+							+ tc.finishedThreads + "\"";
+					String deleteSql = "delete  from jmeter_requests_summary where name = " + "\""
+							+ JMeterContextService.currentTestName + "\"" + " and " + "thread_count = " + "\""
+							+ tc.finishedThreads + "\"";
+					String insertSql = "insert into jmeter_requests_summary(name,thread_count,ok_percent,ko_percent,create_time) values "
+							+ "(" + "\"" + JMeterContextService.currentTestName + "\"" + "," + "\"" + tc.finishedThreads
+							+ "\"" + "," + "\"" + okPercent + "\"" + "," + "\"" + koPercent + "\"" + "," + "\""
+							+ dateString + "\"" + ")";
+
+					ResultSet rs = null;
+					try {
+						rs = stmt.executeQuery(selectSql);
+						if (rs.next()) {
+							if (rs.getInt("num") != 0) {
+								stmt.executeUpdate(deleteSql);
+							}
+
+						}
+						int resultxxx = stmt.executeUpdate(insertSql);
+					} catch (SQLException e) {
+						e.printStackTrace();
+					} finally {
+						MysqlUtil.close(rs, null, null);
+					}
+				}
+				if ("statisticsSummary".equals(resultKey)) {
+
+					//System.out.println("result.accept(visitor):"+result.accept(visitor));
+					JSONObject resultJsonObj = (JSONObject) JSON.parse(result.accept(visitor).toString());
+					JSONArray items = resultJsonObj.getJSONArray("items");
+					System.out
+							.println("========================> items-->statisticsSummary:" + JSON.toJSONString(items));
+					Iterator it = items.iterator();
+					while (it.hasNext()) {
+						JSONObject innerObj = (JSONObject) it.next();
+						JSONArray datas = innerObj.getJSONArray("data");
+						if (datas.size() != 13) {
+
+						}
+						Iterator innerIt = datas.iterator();
+
+						String label = (String) innerIt.next();
+						String samples = String.valueOf(innerIt.next());
+						String ko = String.valueOf(innerIt.next());
+						String error = String.valueOf(innerIt.next());
+						String average = String.valueOf(innerIt.next());
+						String min = String.valueOf(innerIt.next());
+						String max = String.valueOf(innerIt.next());
+						String ninePct = String.valueOf(innerIt.next());
+						String nineFivePct = String.valueOf(innerIt.next());
+						String nineNinePct = String.valueOf(innerIt.next());
+						String throughput = String.valueOf(innerIt.next());
+						String received = String.valueOf(innerIt.next());
+						String sent = String.valueOf(innerIt.next());
+
+						String selectSql = "select count(*) as num from jmeter_result_report where name = " + "\""
+								+ JMeterContextService.currentTestName + "\"" + " and " + "label = " + "\"" + label
+								+ "\"" + " and " + "thread_count = " + "\"" + tc.finishedThreads + "\"";
+						String deleteSql = "delete  from jmeter_result_report where name = " + "\""
+								+ JMeterContextService.currentTestName + "\"" + " and " + "label = " + "\"" + label
+								+ "\"" + " and " + "thread_count = " + "\"" + tc.finishedThreads + "\"";
+
+						String insertSql = "insert into jmeter_result_report(name,thread_count,label,samples,ko,error,average,min,max,90th_pct,95th_pct,99th_pct,throughput,received,sent,create_time) values "
+								+ "(" + "\"" + JMeterContextService.currentTestName + "\"" + "," + "\""
+								+ tc.finishedThreads + "\"" + "," + "\"" + label + "\"" + "," + "\"" + samples + "\""
+								+ "," + "\"" + ko + "\"" + "," + "\"" + error + "\"" + "," + "\"" + average + "\"" + ","
+								+ "\"" + min + "\"" + "," + "\"" + max + "\"" + "," + "\"" + ninePct + "\"" + "," + "\""
+								+ nineFivePct + "\"" + "," + "\"" + nineNinePct + "\"" + "," + "\"" + throughput + "\""
+								+ "," + "\"" + received + "\"" + "," + "\"" + sent + "\"" + "," + "\"" + dateString
+								+ "\"" + ")";
+						System.out.println("insertSql:" + insertSql);
+						ResultSet rs = null;
+						try {
+							rs = stmt.executeQuery(selectSql);
+							if (rs.next()) {
+								if (rs.getInt("num") != 0) {
+									stmt.executeUpdate(deleteSql);
+								}
+
+							}
+							int resultxxx = stmt.executeUpdate(insertSql);
+						} catch (SQLException e) {
+							e.printStackTrace();
+						} finally {
+							MysqlUtil.close(rs, null, null);
+
+						}
+
+					}
+
+				} 
+			} finally {
+				MysqlUtil.close(null, stmt, conn);
+			}
+            
         }
     }
 
