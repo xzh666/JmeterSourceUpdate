@@ -31,6 +31,8 @@ public final class JMeterContextService {
             return new JMeterContext();
         }
     };
+    
+    public static String currentTestName = "";
 
     //@GuardedBy(JMeterContextService.class)
     private static long testStart = 0;

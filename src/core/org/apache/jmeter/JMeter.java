@@ -90,6 +90,7 @@ import org.apache.jmeter.save.SaveService;
 import org.apache.jmeter.services.FileServer;
 import org.apache.jmeter.testelement.TestElement;
 import org.apache.jmeter.testelement.TestStateListener;
+import org.apache.jmeter.threads.JMeterContextService;
 import org.apache.jmeter.threads.RemoteThreadsListenerTestElement;
 import org.apache.jmeter.util.BeanShellInterpreter;
 import org.apache.jmeter.util.BeanShellServer;
@@ -173,6 +174,10 @@ public class JMeter implements JMeterPlugin {
     private static final int REMOTE_STOP        = 'X';// $NON-NLS-1$
     
     private static final String JMX_SUFFIX = ".JMX"; // $NON-NLS-1$
+    
+    
+    //新增命令行参数类型
+    private static final int CURRENT_TEST_NAME  = 'Z';// $NON-NLS-1$
 
     private static final String PACKAGE_PREFIX = "org.apache."; //$NON_NLS-1$
 
@@ -285,6 +290,13 @@ public class JMeter implements JMeterPlugin {
             new CLOptionDescriptor("forceDeleteResultFile",
                     CLOptionDescriptor.ARGUMENT_DISALLOWED, FORCE_DELETE_RESULT_FILE,
                     "force delete existing results files before start the test");
+     
+     
+     
+     //新增命令行参数类型
+     private static final CLOptionDescriptor D_CURRENT_TEST_NAME =
+             new CLOptionDescriptor("currentTestName", CLOptionDescriptor.ARGUMENT_REQUIRED, CURRENT_TEST_NAME,
+                     "this test name");
 
     private static final String[][] DEFAULT_ICONS = {
             { "org.apache.jmeter.control.gui.TestPlanGui",               "org/apache/jmeter/images/beaker.gif" },     //$NON-NLS-1$ $NON-NLS-2$
@@ -330,6 +342,7 @@ public class JMeter implements JMeterPlugin {
             D_REPORT_GENERATING_OPT,
             D_REPORT_AT_END_OPT,
             D_REPORT_OUTPUT_FOLDER_OPT,
+            D_CURRENT_TEST_NAME
     };
     
     /** Properties to be sent to remote servers */
@@ -434,6 +447,13 @@ public class JMeter implements JMeterPlugin {
             if (gui && nonGuiOnly) {
                 error = "-r and -R and -X are only valid in non-GUI mode";
             }
+        }
+        CLOption current_test_name = parser.getArgumentById(CURRENT_TEST_NAME);
+        if(current_test_name!=null){
+        	String currentTestName = current_test_name.getArgument();
+            JMeterContextService.currentTestName = currentTestName;
+        }else{
+        	//error = "-Z must need :please input the this load test program name";
         }
         if (null != error) {
             System.err.println("Error: " + error);//NOSONAR
@@ -587,7 +607,7 @@ public class JMeter implements JMeterPlugin {
                         throw new IllegalUserActionException(
                                 "Option -"+ ((char)REPORT_AT_END_OPT)+" requires -"+((char)LOGFILE_OPT )+ " option");
                     }
-                    startNonGui(testFile, jtlFile, rem, reportAtEndOpt != null);
+                    startNonGui(testFile, jtlFile, rem, reportAtEndOpt != null,current_test_name);
                     startOptionalServers();
                 }
             }
@@ -938,7 +958,7 @@ public class JMeter implements JMeterPlugin {
         return jmlogfile;
     }
 
-    private void startNonGui(String testFile, String logFile, CLOption remoteStart, boolean generateReportDashboard)
+    private void startNonGui(String testFile, String logFile, CLOption remoteStart, boolean generateReportDashboard,CLOption current_test_name)
             throws IllegalUserActionException, ConfigurationException {
         // add a system property so samplers can check to see if JMeter
         // is running in NonGui mode
@@ -952,6 +972,10 @@ public class JMeter implements JMeterPlugin {
 
         String remoteHostsString = null;
         if (remoteStart != null) {
+        	if(current_test_name==null){
+        		System.out.println("-Z must need :please input the this load test program name");
+        		return ;
+        	}
             remoteHostsString = remoteStart.getArgument();
             if (remoteHostsString == null) {
                 remoteHostsString = JMeterUtils.getPropDefault(
