@@ -30,7 +30,12 @@ import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.MalformedURLException;
 import java.net.SocketException;
+import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
+import java.sql.Connection;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.text.SimpleDateFormat;
 import java.util.Collection;
 import java.util.Date;
@@ -89,6 +94,7 @@ import org.apache.jmeter.threads.RemoteThreadsListenerTestElement;
 import org.apache.jmeter.util.BeanShellInterpreter;
 import org.apache.jmeter.util.BeanShellServer;
 import org.apache.jmeter.util.JMeterUtils;
+import org.apache.jmeter.xuzhihua.MysqlUtil;
 import org.apache.jorphan.collections.HashTree;
 import org.apache.jorphan.collections.SearchByClass;
 import org.apache.jorphan.gui.ComponentUtil;
@@ -498,7 +504,48 @@ public class JMeter implements JMeterPlugin {
             } else if (parser.getArgumentById(SERVER_OPT) != null) {
                 // Start the server
                 try {
-                    RemoteJMeterEngineImpl.startServer(RmiUtils.getRmiRegistryPort()); // $NON-NLS-1$
+                	
+                	 RemoteJMeterEngineImpl.startServer(JMeterUtils.getPropDefault("server_port", 0)); // $NON-NLS-1$
+                     InetAddress netAddress = getInetAddress();  
+                     System.out.println("host name:" + getHostName(netAddress)); 
+                     String slaveIp = getHostIp(netAddress);
+                     String slaveHostName = getHostName(netAddress);
+                     int slavePort = JMeterUtils.getPropDefault("server_port", 0);
+                     System.out.println("slaveIp+"+slaveIp+"==>"+"slaveHostName:"+slaveHostName+"===>"+"slavePort"+slavePort);
+                	
+                	Connection conn = null;
+                	Statement stmt = null;
+                	ResultSet rs = null;
+                	try {
+                		conn = MysqlUtil.getConnection();
+            			stmt = conn.createStatement();
+            		} catch (Exception e) {
+            			e.printStackTrace();
+            		}
+                	
+                	String selectSql = "select count(*) as num from jmeter_master_slave where ip = " + "\""+slaveIp+"\"" +" and " + "port = " + "\""+String.valueOf(slavePort)+"\"";
+                	String insertSql = "insert into jmeter_master_slave(host_name,ip,port,type) values "+"("
+                        	+"\""+slaveHostName+"\""+","
+                        	+"\""+slaveIp+"\""+","
+                        	+"\""+String.valueOf(slavePort)+"\""+","
+                        	+"\""+"slave"+"\""+
+                        	")";
+                	try {
+                		rs = stmt.executeQuery(selectSql);
+                		if(rs.next()){
+                			if(rs.getInt("num")!=0){
+                			}else{
+        						int resultxxx = stmt.executeUpdate(insertSql);
+                			}
+                		}
+					} catch (SQLException e) {
+						e.printStackTrace();
+					}finally{
+						MysqlUtil.close(rs, stmt, conn);
+					}
+                	
+                   
+                    
                     startOptionalServers();
                 } catch (Exception ex) {
                     System.err.println("Server failed to start: "+ex);//NOSONAR
@@ -1371,5 +1418,32 @@ public class JMeter implements JMeterPlugin {
         }
 
         return socket;
+    }
+    
+    public static InetAddress getInetAddress(){  
+  	  
+        try{  
+            return InetAddress.getLocalHost();  
+        }catch(UnknownHostException e){  
+            System.out.println("unknown host!");  
+        }  
+        return null;  
+  
+    }  
+  
+    public static String getHostIp(InetAddress netAddress){  
+        if(null == netAddress){  
+            return null;  
+        }  
+        String ip = netAddress.getHostAddress(); //get the ip address  
+        return ip;  
+    }  
+  
+    public static String getHostName(InetAddress netAddress){  
+        if(null == netAddress){  
+            return null;  
+        }  
+        String name = netAddress.getHostName(); //get the host address  
+        return name;  
     }
 }
